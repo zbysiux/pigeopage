@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>pigeos v0.5 - Kernel Technical Specification</title>
+    <style>
+        body {
+            background-color: #0f141c;
+            color: #e1e4ea;
+            font-family: 'Consolas', 'Courier New', monospace;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 { color: #719df2; border-bottom: 2px solid #30363d; padding-bottom: 10px; font-size: 24px; }
+        h2 { color: #34bf7d; font-size: 18px; margin-top: 30px; }
+        h3 { color: #f2cc60; font-size: 15px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            background-color: #161b22;
+        }
+        th, td {
+            border: 1px solid #30363d;
+            padding: 10px;
+            text-align: left;
+        }
+        th { background-color: #21262d; color: #719df2; }
+        .badge {
+            background-color: #8957e5;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .port { color: #ff7b72; font-weight: bold; }
+        .addr { color: #d2a8ff; font-weight: bold; }
+        ul { list-style-type: square; padding-left: 20px; }
+        li { margin-bottom: 5px; }
+        code { background-color: #21262d; padding: 2px 5px; border-radius: 3px; color: #ff7b72; }
+        
+        /* Sekcja pobierania */
+        .download-box {
+            background-color: #1f242c;
+            border: 1px solid #30363d;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .download-btn {
+            background-color: #2da44e;
+            color: #ffffff;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            transition: background-color 0.2s;
+            border: 1px solid rgba(27, 31, 36, 0.15);
+        }
+        .download-btn:hover {
+            background-color: #2c974b;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>pigeos v0.5 — Specyfikacja Techniczna Jądra</h1>
+
+    <div class="download-box">
+        <div>
+            <h3 style="margin: 0 0 5px 0; color: #55ff55;">Kompilacja Gotowa (Live Image)</h3>
+            <p style="margin: 0; font-size: 13px; color: #8b949e;">Pobierz gotowy obraz dysku jądra, aby uruchomić go bezpośrednio w QEMU, VirtualBox lub VMware.</p>
+        </div>
+        <a href="pigeos.iso" download="pigeos.iso" class="download-btn">⬇ Pobierz pigeos.iso</a>
+    </div>
+
+    <h2>1. Alokacja Pamięci i Sprzęt VGA</h2>
+    <p>Jądro systemu operacyjnego działa w 32-bitowym trybie chronionym (Protected Mode) architektury x86. Poniższa tabela przedstawia mapowanie pamięci zaimplementowane w kodzie źródłowym:</p>
+    
+    <table>
+        <tr>
+            <th>Zasób / Bufor</th>
+            <th>Adres Pamięci (RAM)</th>
+            <th>Typ danych / Rozmiar</th>
+            <th>Opis</th>
+        </tr>
+        <tr>
+            <td><code>VGA_BUFFER</code></td>
+            <td class="addr">0xB8000</td>
+            <td>uint16_t* (80x25)</td>
+            <td>Pamięć ekranu tekstowego trybu kolorowego VGA.</td>
+        </tr>
+        <tr>
+            <td><code>notepad_buffer</code></td>
+            <td>Statyczny RAM jądra</td>
+            <td>char[2048]</td>
+            <td>Trwały bufor przechowujący zawartość aplikacji Notatnika.</td>
+        </tr>
+    </table>
+
+    <h2>2. Rejestry i Mapowanie Portów I/O (Asm Volatile)</h2>
+    <p>Komunikacja ze sprzętem odbywa się za pomocą niskopoziomowych instrukcji procesora <code>inb</code> oraz <code>outb</code>:</p>
+    
+    <ul>
+        <li><span class="port">0x60</span> — <strong>Data Port:</strong> Odczyt skan kodu wciśniętego klawisza (Klawiatura).</li>
+        <li><span class="port">0x64</span> — <strong>Status Register:</strong> Sprawdzanie bitu wejściowego bufora klawiatury (Polling). Wysłanie komendy <code>0xFE</code> wymusza Real Hardware Reset (Reboot).</li>
+        <li><span class="port">0x70</span> — <strong>RTC Address Port:</strong> Wybór rejestru zegara czasu rzeczywistego (np. sekundy, minuty, godziny).</li>
+        <li><span class="port">0x71</span> — <strong>RTC Data Port:</strong> Odczyt/Zapis danych CMOS w formacie BCD.</li>
+    </ul>
+
+    <h2>3. Referencja API Jądra (Kernel Functions)</h2>
+    
+    <h3>Zarządzanie Ekranem i Tekstem</h3>
+    <ul>
+        <li><code>void clear_screen(uint8_t color)</code> — Czyszczenie bufora VGA określonym atrybute koloru, reset kursora do (0,0).</li>
+        <li><code>void put_char_at(char c, uint8_t color, int x, int y)</code> — Bezpośredni zapis znaku i koloru pod konkretny indeks pamięci ekranu.</li>
+        <li><code>void print_char(char c, uint8_t color)</code> — Strumieniowe wypisanie znaku z obsługą znaków specjalnych (<code>\n</code>, <code>\b</code>).</li>
+        <li><code>void print_int(int num, uint8_t color)</code> — Funkcja jądra do konwersji i wyświetlania liczb całkowitych bez użycia biblioteki standardowej C.</li>
+    </ul>
+
+    <h3>Sterowniki i Obsługa Stringów</h3>
+    <ul>
+        <li><code>char get_key(void)</code> — Blokująca funkcja odpytująca kontroler PS/2 w pętli (Polling) i mapująca tablicę scancodów na ASCII.</li>
+        <li><code>void show_polish_time(void)</code> — Odczyt z układu RTC, konwersja BCD do BIN oraz formatowanie polskiej strefy czasowej.</li>
+    </ul>
+
+    <h2>4. Słownik Interpretera Komend (CLI Registry)</h2>
+    <p>Główna pętla <code>kernel_main</code> parsuje komendy wprowadzane do bufora tekstowego (maks. 80 znaków). Rejestr obsługuje:</p>
+
+    <table>
+        <tr>
+            <th>Komenda</th>
+            <th>Typ</th>
+            <th>Działanie systemowe</th>
+        </tr>
+        <tr>
+            <td><code>help</code></td>
+            <td><span class="badge" style="background-color: #2da44e;">System</span></td>
+            <td>Wyświetla kompletną listę dostępnych procedur.</td>
+        </tr>
+        <tr>
+            <td><code>notepad</code></td>
+            <td><span class="badge" style="background-color: #0969da;">Aplikacja</span></td>
+            <td>Przełącza tryb graficzny VGA na niebieskie tło (0x1F) i uruchamia edytor.</td>
+        </tr>
+        <tr>
+            <td><code>chromium</code></td>
+            <td><span class="badge" style="background-color: #0969da;">Aplikacja</span></td>
+            <td>Tekstowy emulator sieci, parsuje statyczne mock-up adresy URL.</td>
+        </tr>
+        <tr>
+            <td><code>reboot</code></td>
+            <td><span class="badge" style="background-color: #cf222e;">Hardware</span></td>
+            <td>Wysyła sygnał resetu do kontrolera klawiatury w celu restartu PC.</td>
+        </tr>
+        <tr>
+            <td><code>exit</code> / <code>shutdown</code></td>
+            <td><span class="badge" style="background-color: #cf222e;">Hardware</span></td>
+            <td>Wyłącza przerwania i zatrzymuje procesor za pomocą instrukcji <code>cli; hlt</code>.</td>
+        </tr>
+    </table>
+
+    <p style="font-size: 11px; color: #8b949e; margin-top: 50px; border-top: 1px solid #30363d; padding-top: 10px;">
+        pigeos kernel technical spec • v0.5 build-2026 • Architektura x86 Tryb Chroniony
+    </p>
+
+</body>
+</html>
